@@ -1,0 +1,65 @@
+{
+  "name": "gurukid-usb-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --port 5176",
+    "dev:electron": "wait-on http://localhost:5176 && electron .",
+    "build": "vite build",
+    "build:renderer": "vite build",
+    "package:win": "npm run build:renderer && electron-builder --win --x64 --dir",
+    "package:win:portable": "npm run build:renderer && electron-packager . GuruKid --platform=win32 --arch=x64 --overwrite --out=gurukid.exe --prune=true --ignore=^/src --ignore=^/dist-electron",
+    "package:installer": "npm run build:renderer && electron-builder --win --x64 nsis",
+    "lint": "echo skip"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "clsx": "^2.1.0",
+    "electron-is-dev": "^2.0.0",
+    "lucide-react": "^0.344.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-draggable": "^4.4.6",
+    "react-rnd": "^10.5.3",
+    "socket.io-client": "^4.7.5",
+    "uuid": "^9.0.1",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "concurrently": "^8.2.2",
+    "electron": "^28.2.5",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.0.10",
+    "wait-on": "^7.1.0"
+  },
+  "build": {
+    "appId": "com.gurukid.usbos",
+    "productName": "GuruKid",
+    "directories": {
+      "output": "gurukid.exe"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "asar": true,
+    "win": {
+      "target": [
+        "dir"
+      ],
+      "executableName": "GuruKid"
+    }
+  }
+}

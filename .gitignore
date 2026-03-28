@@ -1,0 +1,58 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Node.js dependencies
+node_modules/
+
+# Build outputs
+**/dist/
+**/build/
+**/.next/
+
+# Electron packaging outputs (usb-os)
+usb-os/gurukid.exe/
+usb-os/release/
+usb-os/*.exe
+
+# Runtime/local device data
+usb-os/device-storage/
+usb-os/config/
+usb-os/settings.json
+
+# Python caches and virtual environments (client)
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Coverage
+coverage/
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.temp

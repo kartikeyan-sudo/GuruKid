@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  nickname TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS devices (
+  id UUID PRIMARY KEY,
+  device_key TEXT NOT NULL,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (device_key, user_id)
+);
