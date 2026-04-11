@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { ChevronLeft, ChevronRight, RotateCw, Plus, X, Download, DownloadCloud, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCw, Plus, X, Download, DownloadCloud, Search, Globe } from "lucide-react";
 import { sendLog } from "../../services/socket.js";
+import { useSettingsStore } from "../../store/settingsStore.js";
 import clsx from "clsx";
-
-const BLOCKED_DOMAINS = ["facebook.com", "tiktok.com", "x.com", "youtube.com"];
 
 export default function BrowserApp() {
   const [tabs, setTabs] = useState([{ id: 1, title: "Google", url: "https://www.google.com" }]);
@@ -11,9 +10,11 @@ export default function BrowserApp() {
   const [downloads, setDownloads] = useState([]);
   const [downloadsPanelOpen, setDownloadsPanelOpen] = useState(false);
   const [addressInput, setAddressInput] = useState("https://www.google.com");
+  const [isLoading, setIsLoading] = useState(false);
   const webviewRef = useRef(null);
   const addressInputRef = useRef(null);
   const completionPromptedRef = useRef(new Set());
+  const blockedSites = useSettingsStore((s) => s.settings.blockedSites || []);
 
   const activeTabData = tabs.find((t) => t.id === activeTab);
 
@@ -44,9 +45,7 @@ export default function BrowserApp() {
           webviewRef.current.stop?.();
           webviewRef.current.src = "about:blank";
         }
-      } catch {
-        // ignore webview teardown errors
-      }
+      } catch { /* ignore */ }
     };
   }, []);
 
@@ -57,8 +56,15 @@ export default function BrowserApp() {
     const handleNavigate = (e) => {
       const nextUrl = e?.url || "";
       if (!nextUrl) return;
+      const host = getHost(nextUrl);
+      if (isBlockedHost(host)) {
+        const html = `<html><body style="background:#080d1a;color:white;font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="font-size:48px;margin-bottom:16px">🚫</div><h1 style="font-size:20px;font-weight:600">Domain Blocked</h1><p style="color:#94a3b8;margin-top:8px">${host} is blocked by parental controls</p></div></body></html>`;
+        if (webviewRef.current) webviewRef.current.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`);
+        return;
+      }
       setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, url: nextUrl } : t)));
       setAddressInput(nextUrl);
+      setIsLoading(false);
       sendLog({ type: "browser", action: "visit", url: nextUrl });
     };
 
@@ -68,167 +74,105 @@ export default function BrowserApp() {
       setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, title } : t)));
     };
 
+    const handleStartLoading = () => setIsLoading(true);
+    const handleStopLoading = () => setIsLoading(false);
+
     webview.addEventListener("did-navigate", handleNavigate);
     webview.addEventListener("did-navigate-in-page", handleNavigate);
     webview.addEventListener("page-title-updated", handleTitle);
-    webview.addEventListener("dom-ready", () => {
-      webview.focus();
-    });
+    webview.addEventListener("did-start-loading", handleStartLoading);
+    webview.addEventListener("did-stop-loading", handleStopLoading);
+    webview.addEventListener("dom-ready", () => webview.focus());
 
     return () => {
       webview.removeEventListener("did-navigate", handleNavigate);
       webview.removeEventListener("did-navigate-in-page", handleNavigate);
       webview.removeEventListener("page-title-updated", handleTitle);
+      webview.removeEventListener("did-start-loading", handleStartLoading);
+      webview.removeEventListener("did-stop-loading", handleStopLoading);
     };
   }, [activeTab]);
 
-  // Listen for download progress from main process
+  // Download listeners
   useEffect(() => {
     if (!window.electronAPI) return;
-
-    // Listen for download progress
-    const unsubscribeStarted = window.electronAPI.on("download-started", (data) => {
-      setDownloads((d) => {
-        const exists = d.some((dl) => dl.id === data.id);
-        return exists ? d : [data, ...d];
-      });
+    const unsubStarted = window.electronAPI.on("download-started", (data) => {
+      setDownloads((d) => d.some((dl) => dl.id === data.id) ? d : [data, ...d]);
       setDownloadsPanelOpen(true);
       sendLog({ type: "download", action: "started", filename: data.filename });
     });
-
-    // Listen for download progress
-    const unsubscribeProgress = window.electronAPI.on("download-progress", (data) => {
+    const unsubProgress = window.electronAPI.on("download-progress", (data) => {
       setDownloads((d) => {
         const existing = d.find((dl) => dl.id === data.id);
-        if (existing) {
-          return d.map((dl) =>
-            dl.id === data.id
-              ? { ...dl, progress: data.progress, total: data.total, percent: data.percent }
-              : dl
-          );
-        } else {
-          return [{ id: data.id, filename: data.filename, state: "in-progress", percent: 0, ...data }, ...d];
-        }
+        if (existing) return d.map((dl) => dl.id === data.id ? { ...dl, progress: data.progress, total: data.total, percent: data.percent } : dl);
+        return [{ id: data.id, filename: data.filename, state: "in-progress", percent: 0, ...data }, ...d];
       });
     });
-
-    // Listen for completed downloads
-    const unsubscribeCompleted = window.electronAPI.on("download-completed", (data) => {
+    const unsubCompleted = window.electronAPI.on("download-completed", (data) => {
       setDownloads((d) => {
-        const hasItem = d.some((dl) => dl.id === data.id);
-        const next = hasItem
-          ? d.map((dl) => (dl.id === data.id ? { ...dl, ...data, state: "completed", percent: 100 } : dl))
+        const has = d.some((dl) => dl.id === data.id);
+        return has
+          ? d.map((dl) => dl.id === data.id ? { ...dl, ...data, state: "completed", percent: 100 } : dl)
           : [{ ...data, state: "completed", percent: 100 }, ...d];
-        return next;
       });
-
       sendLog({ type: "download", action: "completed", filename: data.filename, path: data.path });
-
-      // Notify other apps to refresh downloads folder.
       window.dispatchEvent(new CustomEvent("os-storage-updated", { detail: { area: "downloads" } }));
-
       if (!completionPromptedRef.current.has(data.id)) {
         completionPromptedRef.current.add(data.id);
-        const shouldOpen = window.confirm(`${data.filename} downloaded successfully. Open in File Manager?`);
-        if (shouldOpen) {
-          openDownloadsInOs();
-        }
+        if (window.confirm(`${data.filename} downloaded. Open in Files?`)) openDownloadsInOs();
       }
     });
-
-    // Listen for cancelled downloads
-    const unsubscribeCancelled = window.electronAPI.on("download-cancelled", (data) => {
-      setDownloads((d) =>
-        d.map((dl) => (dl.id === data.id ? { ...dl, state: "cancelled" } : dl))
-      );
+    const unsubCancelled = window.electronAPI.on("download-cancelled", (data) => {
+      setDownloads((d) => d.map((dl) => dl.id === data.id ? { ...dl, state: "cancelled" } : dl));
     });
-
-    // Listen for failed downloads
-    const unsubscribeFailed = window.electronAPI.on("download-failed", (data) => {
-      setDownloads((d) =>
-        d.map((dl) => (dl.id === data.id ? { ...dl, state: "failed", error: data.error } : dl))
-      );
+    const unsubFailed = window.electronAPI.on("download-failed", (data) => {
+      setDownloads((d) => d.map((dl) => dl.id === data.id ? { ...dl, state: "failed", error: data.error } : dl));
       sendLog({ type: "download", action: "failed", filename: data.filename, error: data.error });
     });
-
-    return () => {
-      unsubscribeStarted?.();
-      unsubscribeProgress?.();
-      unsubscribeCompleted?.();
-      unsubscribeCancelled?.();
-      unsubscribeFailed?.();
-    };
+    return () => { unsubStarted?.(); unsubProgress?.(); unsubCompleted?.(); unsubCancelled?.(); unsubFailed?.(); };
   }, []);
 
   const normalizeInputToUrl = (input) => {
     const value = (input || "").trim();
     if (!value) return "https://www.google.com";
-
-    if (/^(https?:|file:|about:|data:)/i.test(value)) {
-      return value;
-    }
-
-    const looksLikeDomain = /^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(value);
-    if (looksLikeDomain) {
-      return `https://${value}`;
-    }
-
+    if (/^(https?:|file:|about:|data:)/i.test(value)) return value;
+    if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(value)) return `https://${value}`;
     return `https://www.google.com/search?q=${encodeURIComponent(value)}`;
   };
 
+  const getHost = (input) => {
+    try {
+      return new URL(input).hostname.toLowerCase().replace(/^www\./, "");
+    } catch {
+      return String(input || "")
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .split("/")[0]
+        .split(":")[0]
+        .replace(/^www\./, "");
+    }
+  };
+
+  const isBlockedHost = (host) => (blockedSites || []).some((d) => host.includes(String(d).toLowerCase()));
+
   const navigate = (input) => {
     const url = normalizeInputToUrl(input);
-    let host = "";
-    try {
-      const parsed = new URL(url);
-      host = parsed.hostname;
-    } catch {
-      host = url.replace(/https?:\/\//, "").split("/")[0];
-    }
-
-    const isBlocked = BLOCKED_DOMAINS.some((d) => host.includes(d));
-
-    if (isBlocked) {
-      // Show blocked page
-      const blockedHtml = `
-        <html><body style="background: #0f172a; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh;">
-          <div style="text-align: center;">
-            <h1>🚫 Domain Blocked</h1>
-            <p>${host} is blocked by parental controls</p>
-          </div>
-        </body></html>
-      `;
-      if (webviewRef.current) {
-        webviewRef.current.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(blockedHtml)}`);
-      }
+    const host = getHost(url);
+    if (isBlockedHost(host)) {
+      const html = `<html><body style="background:#080d1a;color:white;font-family:Inter,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="font-size:48px;margin-bottom:16px">🚫</div><h1 style="font-size:20px;font-weight:600">Domain Blocked</h1><p style="color:#94a3b8;margin-top:8px">${host} is blocked by parental controls</p></div></body></html>`;
+      if (webviewRef.current) webviewRef.current.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`);
       return;
     }
-
+    setIsLoading(true);
     sendLog({ type: "browser", url, action: "navigate" });
     setTabs((prev) => prev.map((t) => (t.id === activeTab ? { ...t, url } : t)));
     setAddressInput(url);
-    if (webviewRef.current) {
-      webviewRef.current.loadURL(url);
-    }
+    if (webviewRef.current) webviewRef.current.loadURL(url);
   };
 
-  const goBack = () => {
-    if (webviewRef.current && webviewRef.current.canGoBack?.()) {
-      webviewRef.current.goBack();
-    }
-  };
-
-  const goForward = () => {
-    if (webviewRef.current && webviewRef.current.canGoForward?.()) {
-      webviewRef.current.goForward();
-    }
-  };
-
-  const reload = () => {
-    if (webviewRef.current) {
-      webviewRef.current.reload();
-    }
-  };
+  const goBack = () => webviewRef.current?.canGoBack?.() && webviewRef.current.goBack();
+  const goForward = () => webviewRef.current?.canGoForward?.() && webviewRef.current.goForward();
+  const reload = () => webviewRef.current?.reload();
 
   const newTab = () => {
     const id = Math.max(...tabs.map((t) => t.id), 0) + 1;
@@ -242,112 +186,88 @@ export default function BrowserApp() {
     if (activeTab === id) setActiveTab(newTabs[0]?.id);
   };
 
-  const removeDownload = (id) => {
-    setDownloads((d) => d.filter((dl) => dl.id !== id));
-  };
-
   return (
-    <div className="flex flex-col h-full bg-card">
+    <div className="flex flex-col h-full bg-[#080d1a] rounded-lg overflow-hidden">
+      {/* Loading bar */}
+      {isLoading && (
+        <div className="h-0.5 bg-indigo-500/20 overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 animate-shimmer" style={{ width: "60%" }} />
+        </div>
+      )}
+
       {/* Tab Bar */}
-      <div className="flex items-center gap-1 px-2 py-1 bg-slate-900 border-b border-slate-800 overflow-x-auto">
+      <div className="flex items-center gap-0.5 px-2 pt-1.5 pb-0 bg-[#0a0f1a] overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={clsx(
-              "flex items-center gap-2 px-3 py-2 rounded-t-xl text-sm whitespace-nowrap transition border-b-2",
+              "flex items-center gap-2 px-4 py-2 rounded-t-xl text-xs font-medium whitespace-nowrap transition-all duration-200 max-w-[180px]",
               activeTab === tab.id
-                ? "bg-card border-accent text-white"
-                : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
+                ? "bg-[#080d1a] text-white"
+                : "bg-transparent text-slate-500 hover:text-slate-300 hover:bg-white/5"
             )}
           >
-            {tab.title}
+            <Globe size={12} className="flex-shrink-0 text-slate-500" />
+            <span className="truncate">{tab.title}</span>
             {tabs.length > 1 && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(tab.id);
-                }}
-                className="hover:text-red-400"
+                onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
+                className="ml-1 p-0.5 hover:bg-white/10 rounded transition-colors flex-shrink-0"
               >
-                <X size={14} />
+                <X size={11} />
               </button>
             )}
           </button>
         ))}
         <button
           onClick={newTab}
-          className="flex items-center justify-center w-8 h-8 text-slate-400 hover:text-white hover:bg-slate-700 rounded-t-lg transition"
+          className="p-2 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all"
         >
-          <Plus size={16} />
+          <Plus size={14} />
         </button>
       </div>
 
       {/* Toolbar */}
       <form
-        className="flex items-center gap-2 px-3 py-2 bg-slate-900 border-b border-slate-800"
-        onSubmit={(e) => {
-          e.preventDefault();
-          navigate(addressInput);
-        }}
+        className="flex items-center gap-2 px-3 py-2 bg-[#080d1a] border-b border-white/5"
+        onSubmit={(e) => { e.preventDefault(); navigate(addressInput); }}
       >
-        <button
-          type="button"
-          onClick={goBack}
-          className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition"
-          title="Back"
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <button
-          type="button"
-          onClick={goForward}
-          className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition"
-          title="Forward"
-        >
-          <ChevronRight size={18} />
-        </button>
-        <button
-          type="button"
-          onClick={reload}
-          className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition"
-          title="Reload"
-        >
-          <RotateCw size={18} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button type="button" onClick={goBack} className="p-1.5 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all" title="Back">
+            <ChevronLeft size={16} />
+          </button>
+          <button type="button" onClick={goForward} className="p-1.5 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all" title="Forward">
+            <ChevronRight size={16} />
+          </button>
+          <button type="button" onClick={reload} className={clsx("p-1.5 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all", isLoading && "animate-spin")} title="Reload">
+            <RotateCw size={16} />
+          </button>
+        </div>
 
         {/* Address Bar */}
-        <input
-          ref={addressInputRef}
-          value={addressInput}
-          onChange={(e) => {
-            setAddressInput(e.target.value);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") navigate(addressInput);
-          }}
-          placeholder="Search Google or type a URL"
-          className="flex-1 px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-white text-sm placeholder-slate-500 focus:outline-none focus:border-accent"
-        />
+        <div className="flex-1 relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            ref={addressInputRef}
+            value={addressInput}
+            onChange={(e) => setAddressInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && navigate(addressInput)}
+            placeholder="Search Google or type a URL"
+            className="w-full pl-9 pr-4 py-2 rounded-xl bg-white/5 border border-white/5 text-white text-sm placeholder-slate-600 focus:outline-none focus:border-indigo-500/30 focus:bg-white/[0.07] transition-all"
+          />
+        </div>
 
-        <button
-          type="submit"
-          className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition"
-          title="Search"
-        >
-          <Search size={18} />
-        </button>
-
-        {/* Downloads Button */}
+        {/* Downloads */}
         <button
           type="button"
           onClick={() => setDownloadsPanelOpen(!downloadsPanelOpen)}
-          className="relative p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition"
+          className="relative p-1.5 text-slate-500 hover:text-white hover:bg-white/5 rounded-lg transition-all"
           title="Downloads"
         >
-          <Download size={18} />
+          <Download size={16} />
           {downloads.some((d) => d.state === "in-progress") && (
-            <span className="absolute top-0 right-0 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center">
+            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-indigo-500 text-white text-[9px] flex items-center justify-center font-bold">
               {downloads.filter((d) => d.state === "in-progress").length}
             </span>
           )}
@@ -360,54 +280,44 @@ export default function BrowserApp() {
           ref={webviewRef}
           src={activeTabData?.url || "about:blank"}
           tabIndex={0}
-          style={{ width: "100%", height: "100%", background: "#0b1221" }}
-          className="rounded-lg"
+          style={{ width: "100%", height: "100%", background: "#080d1a" }}
           onClick={() => webviewRef.current?.focus()}
         />
       </div>
 
       {/* Downloads Panel */}
       {downloadsPanelOpen && (
-        <div className="border-t border-slate-800 bg-slate-900 p-3 max-h-40 overflow-auto">
+        <div className="border-t border-white/5 bg-[#0a0f1a] p-3 max-h-40 overflow-auto animate-slide-up">
           {downloads.length === 0 ? (
-            <p className="text-xs text-slate-500">No downloads</p>
+            <p className="text-xs text-slate-600">No downloads</p>
           ) : (
             downloads.map((dl) => (
-              <div key={dl.id} className="flex items-center gap-2 p-2 mb-2 rounded-lg bg-slate-800">
-                <DownloadCloud size={16} className={clsx(dl.state === "completed" ? "text-green-500" : "text-accent")} />
+              <div key={dl.id} className="flex items-center gap-3 p-2 mb-1.5 rounded-xl bg-white/5">
+                <DownloadCloud size={14} className={clsx(dl.state === "completed" ? "text-emerald-400" : "text-indigo-400")} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-white truncate">{dl.filename}</p>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 bg-slate-700 rounded-full h-1">
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex-1 bg-white/5 rounded-full h-1">
                       <div
-                        className={clsx(
-                          "h-1 rounded-full transition-all",
-                          dl.state === "completed" ? "bg-green-500" : dl.state === "failed" ? "bg-red-500" : "bg-accent"
-                        )}
+                        className={clsx("h-1 rounded-full transition-all duration-300", dl.state === "completed" ? "bg-emerald-500" : dl.state === "failed" ? "bg-red-500" : "bg-indigo-500")}
                         style={{ width: `${dl.percent || 0}%` }}
                       />
                     </div>
-                    <span className="text-xs text-slate-400">{Math.round(dl.percent || 0)}%</span>
+                    <span className="text-[10px] text-slate-500">{Math.round(dl.percent || 0)}%</span>
                   </div>
                   {dl.state !== "in-progress" && (
                     <div className="flex items-center justify-between mt-1 gap-2">
-                      <p className="text-xs text-slate-400">{dl.state.toUpperCase()}</p>
+                      <p className="text-[10px] text-slate-500">{dl.state.toUpperCase()}</p>
                       {dl.state === "completed" && (
-                        <button
-                          onClick={openDownloadsInOs}
-                          className="text-[10px] px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200"
-                        >
+                        <button onClick={openDownloadsInOs} className="text-[10px] px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 transition-all">
                           Open in Files
                         </button>
                       )}
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => removeDownload(dl.id)}
-                  className="p-1 text-slate-400 hover:text-red-400 transition"
-                >
-                  <X size={14} />
+                <button onClick={() => setDownloads((d) => d.filter((item) => item.id !== dl.id))} className="p-1 text-slate-500 hover:text-red-400 transition-colors">
+                  <X size={12} />
                 </button>
               </div>
             ))

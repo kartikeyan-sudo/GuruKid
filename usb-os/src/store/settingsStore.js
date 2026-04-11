@@ -7,6 +7,7 @@ const defaultSettings = {
   wallpaper: null,
   globalZoom: 100,
   theme: "dark",
+  blockedSites: [],
   person: {
     childName: "Kid User",
     age: "10",
@@ -55,6 +56,20 @@ export const useSettingsStore = create((set, get) => ({
   },
   setGlobalZoom: (zoom) => get().saveSettings({ globalZoom: zoom }),
   getGlobalZoom: () => get().settings.globalZoom,
+  addBlockedSite: (domain) => {
+    const value = String(domain || "").trim().toLowerCase();
+    if (!value) return;
+    const normalized = value.replace(/^https?:\/\//, "").split("/")[0].split(":")[0].replace(/^www\./, "");
+    const current = get().settings.blockedSites || [];
+    if (current.includes(normalized)) return;
+    get().saveSettings({ blockedSites: [...current, normalized] });
+  },
+  removeBlockedSite: (domain) => {
+    const value = String(domain || "").trim().toLowerCase();
+    const normalized = value.replace(/^https?:\/\//, "").split("/")[0].split(":")[0].replace(/^www\./, "");
+    const current = get().settings.blockedSites || [];
+    get().saveSettings({ blockedSites: current.filter((d) => d !== normalized) });
+  },
 }));
 
 export default useSettingsStore;

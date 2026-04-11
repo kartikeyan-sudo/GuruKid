@@ -6,5 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5176,
+    allowedHosts: [
+      "acres-replies-floyd-lol.trycloudflare.com",
+    ],
   },
 });

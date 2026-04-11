@@ -1,17 +1,30 @@
 @echo off
 setlocal
-set APP_DIR=%~dp0gurukid.exe\GuruKid-win32-x64
-set APP_EXE=%APP_DIR%\GuruKid.exe
+set BASE=%~dp0
+set APP_EXE_PACKAGER=%BASE%gurukid.exe\GuruKid-win32-x64\GuruKid.exe
+set APP_EXE_BUILDER=%BASE%gurukid.exe\win-unpacked\GuruKid.exe
 
-if exist "%APP_EXE%" (
-  start "GuruKid" "%APP_EXE%"
+if exist "%APP_EXE_PACKAGER%" (
+  start "GuruKid" "%APP_EXE_PACKAGER%"
   exit /b 0
 )
 
-echo GuruKid runtime was not found.
-echo Expected: %APP_EXE%
+if exist "%APP_EXE_BUILDER%" (
+  start "GuruKid" "%APP_EXE_BUILDER%"
+  exit /b 0
+)
+
+echo GuruKid packaged runtime was not found.
 echo.
-echo Rebuild package with:
-echo   npm run package:win:portable
+echo Checked:
+echo   %APP_EXE_PACKAGER%
+echo   %APP_EXE_BUILDER%
+echo.
+echo This USB launcher works only with packaged output.
+echo Do not run npm dev mode from pendrive.
+echo.
+echo Build once on your dev PC:
+echo   npm.cmd install
+echo   npm.cmd run package:win:portable
 pause
 exit /b 1
