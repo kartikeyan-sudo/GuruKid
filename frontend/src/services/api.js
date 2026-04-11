@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:4000/api",
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
 });
 
 const TOKEN_KEY = "gurukid-admin-token";
@@ -70,6 +70,16 @@ export async function deleteDevice(deviceId) {
 
 export async function clearDeviceHistory(deviceId, scope = "all") {
   const { data } = await api.post(`/devices/${deviceId}/history/clear`, { scope });
+  return data.device;
+}
+
+export async function blockDeviceSite(deviceId, domain) {
+  const { data } = await api.post(`/devices/${deviceId}/sites/block`, { domain });
+  return data.device;
+}
+
+export async function unblockDeviceSite(deviceId, domain) {
+  const { data } = await api.post(`/devices/${deviceId}/sites/unblock`, { domain });
   return data.device;
 }
 

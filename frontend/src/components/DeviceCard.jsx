@@ -1,49 +1,81 @@
-import { Cpu, MemoryStick, Wifi } from "lucide-react";
+import { Cpu, MemoryStick, Wifi, Clock } from "lucide-react";
 import clsx from "clsx";
 
 export default function DeviceCard({ device, onSelect, isActive }) {
+  const cpuPercent = device.stats?.cpu ?? 0;
+  const ramPercent = device.stats?.ram ?? 0;
+  const isOnline = device.status === "online";
+
   return (
     <button
       onClick={onSelect}
       className={clsx(
-        "w-full text-left p-4 rounded-xl border transition shadow-sm",
-        isActive ? "border-accent/60 bg-card" : "border-slate-800 bg-slate-900 hover:border-accent/40"
+        "w-full text-left p-4 rounded-2xl border transition-all duration-300 hover-lift group",
+        isActive
+          ? "border-indigo-500/30 bg-indigo-500/5 shadow-glow"
+          : "border-white/5 bg-white/[0.02] hover:border-white/10 hover:bg-white/[0.04]"
       )}
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-white font-medium">{device.nickname || device.name || "Device"}</p>
-          <p className="text-xs text-slate-400">{device.email || "No email"}</p>
-          <p className="text-xs text-slate-500">ID: {device.id}</p>
-          <p className="text-xs text-slate-500">Key: {device.deviceKey || "--"}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {device.blocked && <span className="text-[10px] px-2 py-1 rounded-full bg-red-500/20 text-red-200">blocked</span>}
-          <span
-            className={clsx(
-              "text-xs px-2 py-1 rounded-full",
-              device.status === "online" ? "bg-emerald-500/20 text-emerald-200" : "bg-slate-700 text-slate-300"
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-white font-medium text-sm truncate">{device.nickname || device.name || "Device"}</p>
+            {device.blocked && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/20 font-medium">LOCKED</span>
             )}
-          >
+          </div>
+          <p className="text-[10px] text-slate-500 truncate mt-0.5">{device.email || "No email"}</p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className={clsx(
+            "w-2 h-2 rounded-full",
+            isOnline ? "bg-emerald-400 status-online" : "bg-slate-600"
+          )} />
+          <span className={clsx(
+            "text-[10px] font-medium",
+            isOnline ? "text-emerald-400" : "text-slate-500"
+          )}>
             {device.status}
           </span>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-slate-300">
-        <Metric icon={<Cpu size={14} />} label="CPU" value={`${device.stats?.cpu ?? 0}%`} />
-        <Metric icon={<MemoryStick size={14} />} label="RAM" value={`${device.stats?.ram ?? 0}%`} />
-        <Metric icon={<Wifi size={14} />} label="Last" value={device.lastActive?.slice(11, 19) || device.lastSeen?.slice(11, 19) || "--"} />
+
+      {/* Stats bars */}
+      <div className="grid grid-cols-2 gap-2">
+        <StatBar icon={<Cpu size={11} />} label="CPU" value={cpuPercent} color="indigo" />
+        <StatBar icon={<MemoryStick size={11} />} label="RAM" value={ramPercent} color="purple" />
+      </div>
+
+      {/* Last active */}
+      <div className="mt-2.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+        <Clock size={10} />
+        <span>Last: {device.lastActive?.slice(11, 19) || device.lastSeen?.slice(11, 19) || "--"}</span>
       </div>
     </button>
   );
 }
 
-function Metric({ icon, label, value }) {
+function StatBar({ icon, label, value, color }) {
+  const colorMap = {
+    indigo: { bar: "bg-indigo-500", bg: "bg-indigo-500/10" },
+    purple: { bar: "bg-purple-500", bg: "bg-purple-500/10" },
+  };
+  const c = colorMap[color] || colorMap.indigo;
+
   return (
-    <div className="flex items-center gap-1 bg-slate-800/60 px-2 py-1 rounded-lg">
-      {icon}
-      <span className="text-slate-400">{label}</span>
-      <span className="font-semibold text-white">{value}</span>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="flex items-center gap-1 text-slate-400">
+          {icon} {label}
+        </span>
+        <span className="text-white font-semibold">{value}%</span>
+      </div>
+      <div className={`h-1 rounded-full ${c.bg}`}>
+        <div
+          className={`h-1 rounded-full ${c.bar} transition-all duration-500`}
+          style={{ width: `${Math.min(value, 100)}%` }}
+        />
+      </div>
     </div>
   );
 }
