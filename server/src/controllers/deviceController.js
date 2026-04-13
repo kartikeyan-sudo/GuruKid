@@ -4,6 +4,8 @@ import {
   getDevice,
   updateDevice,
   setDeviceBlocked,
+  addBlockedSite,
+  removeBlockedSite,
   deleteDevice,
   clearDeviceHistory,
 } from "../services/deviceStore.js";
@@ -68,13 +70,31 @@ export async function removeDevice(req, res) {
 
 export function clearHistory(req, res) {
   const scope = req.body?.scope || "all";
-  if (!["all", "browser", "download"].includes(scope)) {
+  if (!["all", "browser", "download", "app"].includes(scope)) {
     return res.status(400).json({ error: "Invalid scope" });
   }
 
   const device = clearDeviceHistory(req.params.id, scope);
   if (!device) return res.status(404).json({ error: "Not found" });
 
+  emitToAdmins("device:update", device);
+  return res.json({ device });
+}
+
+export function blockSite(req, res) {
+  const domain = req.body?.domain;
+  if (!domain) return res.status(400).json({ error: "domain is required" });
+  const device = addBlockedSite(req.params.id, domain);
+  if (!device) return res.status(404).json({ error: "Not found" });
+  emitToAdmins("device:update", device);
+  return res.json({ device });
+}
+
+export function unblockSite(req, res) {
+  const domain = req.body?.domain;
+  if (!domain) return res.status(400).json({ error: "domain is required" });
+  const device = removeBlockedSite(req.params.id, domain);
+  if (!device) return res.status(404).json({ error: "Not found" });
   emitToAdmins("device:update", device);
   return res.json({ device });
 }

@@ -6,6 +6,8 @@ import {
   pushStatus,
   blockDevice,
   unblockDevice,
+  blockSite,
+  unblockSite,
   removeDevice,
   clearHistory,
 } from "../controllers/deviceController.js";
@@ -19,6 +21,8 @@ router.get("/", requireAdmin, listDevices);
 router.get("/:id", requireAdmin, getDeviceById);
 router.patch("/:id/block", requireAdmin, blockDevice);
 router.patch("/:id/unblock", requireAdmin, unblockDevice);
+router.post("/:id/sites/block", requireAdmin, blockSite);
+router.post("/:id/sites/unblock", requireAdmin, unblockSite);
 router.post("/:id/history/clear", requireAdmin, clearHistory);
 router.delete("/:id", requireAdmin, removeDevice);
 

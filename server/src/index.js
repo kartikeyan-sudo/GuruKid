@@ -27,8 +27,34 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 initSocket(io);
 
+async function healthOnPort(port) {
+  try {
+    const res = await fetch(`http://localhost:${port}/health`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 initDb()
   .then(() => {
+    server.on("error", async (err) => {
+      if (err?.code === "EADDRINUSE") {
+        const healthy = await healthOnPort(PORT);
+        if (healthy) {
+          console.log(`server already running on ${PORT} (health endpoint reachable)`);
+          process.exit(0);
+          return;
+        }
+        console.error(`port ${PORT} is already in use by another process`);
+        process.exit(1);
+        return;
+      }
+
+      console.error("server failed to start", err);
+      process.exit(1);
+    });
+
     server.listen(PORT, () => {
       console.log(`server listening on ${PORT}`);
     });

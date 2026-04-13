@@ -82,11 +82,18 @@ export async function loginUser({ email, password, deviceKey }) {
       "SELECT id FROM devices WHERE user_id = $1 AND device_key = $2",
       [user.id, deviceKey]
     );
+
     if (existingDevice.rowCount === 0) {
-      throw new Error("Device key mismatch");
+      const anyDevice = await query("SELECT id FROM devices WHERE user_id = $1 LIMIT 1", [user.id]);
+      if (anyDevice.rowCount === 0) {
+        await bindDevice({ userId: user.id, deviceKey });
+      } else {
+        throw new Error("Device key mismatch");
+      }
+    } else {
+      await query("UPDATE devices SET last_active = NOW() WHERE id = $1", [existingDevice.rows[0].id]);
     }
 
-    await query("UPDATE devices SET last_active = NOW() WHERE id = $1", [existingDevice.rows[0].id]);
     return { id: user.id, email: user.email, nickname: user.nickname };
   }
 
@@ -96,12 +103,24 @@ export async function loginUser({ email, password, deviceKey }) {
   const ok = await bcrypt.compare(password, user.password);
   if (!ok) throw new Error("Invalid credentials");
 
+  const userOwnedDevices = [...devicesFallback.values()].filter((dvc) => dvc.user_id === user.id);
   const hasDevice = devicesFallback.has(keyForDevice(deviceKey, user.id));
-  if (!hasDevice) throw new Error("Device key mismatch");
-
-  const d = devicesFallback.get(keyForDevice(deviceKey, user.id));
-  d.last_active = new Date().toISOString();
-  devicesFallback.set(keyForDevice(deviceKey, user.id), d);
+  if (!hasDevice) {
+    if (userOwnedDevices.length === 0) {
+      devicesFallback.set(keyForDevice(deviceKey, user.id), {
+        id: uuid(),
+        device_key: deviceKey,
+        user_id: user.id,
+        last_active: new Date().toISOString(),
+      });
+    } else {
+      throw new Error("Device key mismatch");
+    }
+  } else {
+    const d = devicesFallback.get(keyForDevice(deviceKey, user.id));
+    d.last_active = new Date().toISOString();
+    devicesFallback.set(keyForDevice(deviceKey, user.id), d);
+  }
 
   return { id: user.id, email: user.email, nickname: user.nickname };
 }

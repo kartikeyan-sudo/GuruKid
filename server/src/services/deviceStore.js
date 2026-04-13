@@ -4,6 +4,14 @@ import { v4 as uuid } from "uuid";
 const devices = new Map();
 const commands = [];
 
+function normalizeDomain(input = "") {
+  const value = String(input || "").trim().toLowerCase();
+  if (!value) return "";
+  const withoutProtocol = value.replace(/^https?:\/\//, "");
+  const host = withoutProtocol.split("/")[0].split(":")[0].replace(/^www\./, "");
+  return host;
+}
+
 export function registerDevice(payload = {}) {
   const deviceId = payload.deviceId || uuid();
   const entry = devices.get(deviceId) || {
@@ -18,6 +26,7 @@ export function registerDevice(payload = {}) {
     lastActive: dayjs().toISOString(),
     stats: { cpu: 0, ram: 0 },
     logs: [],
+    blockedSites: [],
     blocked: false,
   };
   entry.name = payload.name || payload.nickname || entry.name;
@@ -92,6 +101,35 @@ export function setDeviceBlocked(deviceId, blocked) {
   return updated;
 }
 
+export function addBlockedSite(deviceId, domain) {
+  const current = devices.get(deviceId);
+  if (!current) return null;
+  const normalized = normalizeDomain(domain);
+  if (!normalized) return current;
+  const blockedSites = Array.from(new Set([...(current.blockedSites || []), normalized]));
+  const updated = {
+    ...current,
+    blockedSites,
+    lastSeen: dayjs().toISOString(),
+  };
+  devices.set(deviceId, updated);
+  return updated;
+}
+
+export function removeBlockedSite(deviceId, domain) {
+  const current = devices.get(deviceId);
+  if (!current) return null;
+  const normalized = normalizeDomain(domain);
+  const blockedSites = (current.blockedSites || []).filter((d) => d !== normalized);
+  const updated = {
+    ...current,
+    blockedSites,
+    lastSeen: dayjs().toISOString(),
+  };
+  devices.set(deviceId, updated);
+  return updated;
+}
+
 export function deleteDevice(deviceId) {
   const existing = devices.get(deviceId);
   if (!existing) return false;
@@ -125,6 +163,7 @@ export function clearDeviceHistory(deviceId, scope = "all") {
   const nextLogs = (current.logs || []).filter((log) => {
     if (scope === "browser") return log.type !== "browser";
     if (scope === "download") return log.type !== "download";
+    if (scope === "app") return log.type !== "app-open";
     return false;
   });
 
